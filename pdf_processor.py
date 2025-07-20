@@ -1,6 +1,6 @@
 """
 Enhanced PDF Processor - Robust PDF processing and outline extraction
-Specifically tuned for hackathon challenge requirements
+Works for any PDF files within 50 pages
 """
 
 import fitz  # PyMuPDF
@@ -54,30 +54,22 @@ class PDFProcessor:
     
     def _extract_title(self, doc: fitz.Document, pdf_path: str) -> str:
         """
-        Extract document title using file-specific logic based on desired outputs
+        Extract document title using multiple strategies for any PDF
         """
         if len(doc) == 0:
             return ""
         
-        filename = pdf_path.lower()
+        # Strategy 1: Check PDF metadata first
+        try:
+            metadata = doc.metadata
+            if metadata and 'title' in metadata and metadata['title']:
+                metadata_title = metadata['title'].strip()
+                if metadata_title and len(metadata_title) > 3 and not self._is_generic_metadata_title(metadata_title):
+                    return self._clean_title_text(metadata_title)
+        except:
+            pass
         
-        # File-specific title extraction based on desired outputs
-        if "file01" in filename:
-            return "Application form for grant of LTC advance  "
-        elif "file02" in filename:
-            return "Overview  Foundation Level Extensions  "
-        elif "file03" in filename:
-            return "RFP:Request for Proposal To Present a Proposal for Developing the Business Plan for the Ontario Digital Library  "
-        elif "file04" in filename:
-            return "Parsippany -Troy Hills STEM Pathways"
-        elif "file05" in filename:
-            return ""
-        
-        # Generic title extraction for unknown files
-        return self._generic_title_extraction(doc)
-    
-    def _generic_title_extraction(self, doc: fitz.Document) -> str:
-        """Generic title extraction for unknown documents"""
+        # Strategy 2: Analyze first page for title using font analysis
         try:
             first_page = doc[0]
             text_dict = first_page.get_text("dict")
@@ -93,61 +85,174 @@ class PDFProcessor:
                     for span in line["spans"]:
                         text = span["text"].strip()
                         if text and len(text) > 3:
-                            # Calculate title score
+                            # Calculate title score based on font properties and position
                             score = self._calculate_title_score(span, text, block)
-                            if score > 10:  # Minimum threshold
+                            if score > 15:  # Minimum threshold for title candidates
                                 title_candidates.append((text, score))
             
-            # Return best candidate
+            # Return best candidate if found
             if title_candidates:
                 title_candidates.sort(key=lambda x: x[1], reverse=True)
                 best_title = title_candidates[0][0]
-                return self._clean_title_text(best_title)
+                cleaned_title = self._clean_title_text(best_title)
+                if len(cleaned_title) > 5:  # Ensure it's substantial enough
+                    return cleaned_title
         
         except Exception as e:
             logger.warning(f"Error extracting title from first page: {e}")
         
-        return "Untitled Document"
+        # Strategy 3: Use table of contents if available
+        try:
+            toc = doc.get_toc()
+            if toc and len(toc) > 0:
+                first_toc = toc[0]
+                if len(first_toc) >= 2:
+                    toc_title = first_toc[1].strip()
+                    if 5 <= len(toc_title) <= 100:
+                        return self._clean_title_text(toc_title)
+        except:
+            pass
+        
+        # Strategy 4: Look for title-like patterns in first few text blocks
+        try:
+            first_page = doc[0]
+            blocks = first_page.get_text("dict")["blocks"]
+            
+            # Collect all text from first page
+            all_text_elements = []
+            for block in blocks[:10]:  # Check first 10 blocks
+                if "lines" in block:
+                    for line in block["lines"]:
+                        for span in line["spans"]:
+                            text = span["text"].strip()
+                            if text and len(text) > 5:
+                                all_text_elements.append(text)
+            
+            # Look for common title patterns
+            for text in all_text_elements[:5]:  # Check first 5 text elements
+                if self._looks_like_title(text):
+                    return self._clean_title_text(text)
+        
+        except Exception as e:
+            logger.warning(f"Error in title pattern search: {e}")
+        
+        return ""
+    
+    def _is_generic_metadata_title(self, title: str) -> bool:
+        """Check if metadata title is too generic/unhelpful"""
+        generic_patterns = [
+            r'^Microsoft\s+Word',
+            r'^Document\d*$',
+            r'^Untitled',
+            r'^\.pdf$',
+            r'^\w+\.pdf$',
+            r'^Page\s+\d+',
+            r'^Draft',
+            r'^Copy\s+of',
+        ]
+        
+        for pattern in generic_patterns:
+            if re.match(pattern, title, re.IGNORECASE):
+                return True
+        return False
     
     def _calculate_title_score(self, span: Dict, text: str, block: Dict) -> float:
         """Calculate title candidacy score for text element"""
         score = 0.0
         
-        # Font size score (larger = better)
+        # Font size score (larger = better for titles)
         font_size = span.get("size", 12)
-        score += font_size * 2
+        if font_size >= 18:
+            score += 40
+        elif font_size >= 16:
+            score += 30
+        elif font_size >= 14:
+            score += 20
+        else:
+            score += font_size
         
-        # Position score (higher on page = better)
+        # Position score (higher on page = better for titles)
         bbox = block.get("bbox", [0, 0, 0, 0])
         y_pos = bbox[1] if len(bbox) > 1 else 0
-        if y_pos < 100:
-            score += 50
-        elif y_pos < 200:
+        if y_pos < 150:  # Top of page
             score += 30
+        elif y_pos < 300:  # Upper portion
+            score += 15
         
         # Font weight score
         flags = span.get("flags", 0)
         if flags & 2**4:  # Bold
-            score += 25
+            score += 20
         if flags & 2**1:  # Italic
-            score += 10
+            score += 5
         
         # Text characteristics
         text_len = len(text)
-        if 10 <= text_len <= 100:
-            score += 20
-        elif text_len > 200:
-            score -= 30
+        if 10 <= text_len <= 80:  # Good title length
+            score += 15
+        elif text_len > 150:  # Too long for title
+            score -= 20
+        elif text_len < 5:  # Too short
+            score -= 10
         
         # Penalize obvious non-titles
-        if re.search(r'^\d+$|^Page\s+|^©|^www\.|^http|^\s*\d+\s*$', text, re.IGNORECASE):
-            score -= 100
+        if re.search(r'^\d+$|^Page\s+|^©|^www\.|^http|^\s*\d+\s*$|^[A-Z]{1,3}\s*$', text, re.IGNORECASE):
+            score -= 50
         
         # Boost for title-like patterns
-        if re.search(r'^(RFP|Request|Understanding|Introduction|Overview|Application)', text, re.IGNORECASE):
-            score += 30
+        title_indicators = [
+            r'^(RFP|Request|Understanding|Introduction|Overview|Application|Report|Analysis|Study|Guide|Manual)',
+            r'(Report|Analysis|Study|Guide|Manual|Plan|Strategy|Framework|Policy|Proposal)$',
+            r':\s*[A-Z]',  # Contains colon followed by capital letter
+        ]
+        
+        for pattern in title_indicators:
+            if re.search(pattern, text, re.IGNORECASE):
+                score += 15
+                break
+        
+        # Penalize body text patterns
+        if text.count('.') >= 2:  # Multiple sentences
+            score -= 25
+        
+        common_words = ["the", "and", "of", "to", "in", "for", "with", "on", "at", "by", "a", "an"]
+        word_count = sum(1 for word in common_words if word in text.lower().split())
+        if word_count >= 4:  # Too many common words
+            score -= 15
         
         return score
+    
+    def _looks_like_title(self, text: str) -> bool:
+        """Check if text looks like a document title"""
+        # Good length for titles
+        if not (5 <= len(text) <= 150):
+            return False
+        
+        # Title-like patterns
+        title_patterns = [
+            r'^[A-Z][^.]*[^.]$',  # Starts with capital, no ending period
+            r'.*:\s*[A-Z].*',     # Contains colon
+            r'^(RFP|Request|Application|Report|Analysis|Study|Guide|Manual|Plan|Strategy)',
+            r'.*(Report|Analysis|Study|Guide|Manual|Plan|Strategy|Framework|Policy|Proposal).*',
+        ]
+        
+        for pattern in title_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return True
+        
+        # Avoid obvious non-titles
+        non_title_patterns = [
+            r'^\d+$',
+            r'^Page\s+\d+',
+            r'^[a-z]',  # Starts with lowercase
+            r'.*[.!?]\s+[A-Z].*',  # Multiple sentences
+        ]
+        
+        for pattern in non_title_patterns:
+            if re.match(pattern, text):
+                return False
+        
+        return False
     
     def _clean_title_text(self, title: str) -> str:
         """Clean and normalize title text"""
@@ -155,10 +260,17 @@ class PDFProcessor:
         title = re.sub(r'\s+', ' ', title).strip()
         
         # Remove common prefixes but keep meaningful ones
-        title = re.sub(r'^(Document:|Report:)\s*', '', title, flags=re.IGNORECASE)
+        prefixes_to_remove = [
+            r'^(Document:|Report:|Title:)\s*',
+            r'^Microsoft\s+Word\s*-\s*',
+        ]
+        
+        for prefix in prefixes_to_remove:
+            title = re.sub(prefix, '', title, flags=re.IGNORECASE)
         
         # Remove trailing artifacts
         title = re.sub(r'[.]{2,}$|^\s*[.]+\s*', '', title)
+        title = re.sub(r'\s*\.pdf\s*$', '', title, flags=re.IGNORECASE)
         
         return title.strip()
     

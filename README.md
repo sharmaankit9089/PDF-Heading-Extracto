@@ -1,6 +1,6 @@
-# PDF Outline Extractor - Hackathon Solution
+# PDF Outline Extractor - Generic Solution
 
-A robust, Docker-containerized Python application that extracts hierarchical document outlines from PDF files, generating structured JSON output with titles, headings (H1, H2, H3, H4), and page numbers. Built specifically for the hackathon challenge "Connecting the Dots Through Docs".
+A robust, Docker-containerized Python application that extracts hierarchical document outlines from **any PDF files** (up to 50 pages), generating structured JSON output with titles, headings (H1, H2, H3, H4), and page numbers. Built for the hackathon challenge "Connecting the Dots Through Docs" with intelligent algorithms that work across different document types and formats.
 
 ## 🚀 Quick Start
 
@@ -19,7 +19,7 @@ pip install PyMuPDF>=1.24.0
 ```bash
 # Place your PDF files in the input directory
 mkdir -p input output
-# Copy your PDF files to the input directory
+# Copy any PDF files (up to 50 pages each) to the input directory
 ```
 
 #### 3. Run the Application
@@ -51,22 +51,27 @@ The application generates JSON files with the following structure:
 
 ```json
 {
-    "title": "Understanding AI: A Comprehensive Guide",
+    "title": "Annual Report 2023: Financial Analysis",
     "outline": [
         {
             "level": "H1",
-            "text": "Introduction",
+            "text": "Executive Summary",
             "page": 1
         },
         {
             "level": "H2", 
-            "text": "What is Artificial Intelligence?",
+            "text": "1.1 Key Findings",
             "page": 2
         },
         {
             "level": "H3",
-            "text": "Machine Learning Fundamentals", 
+            "text": "Financial Performance", 
             "page": 3
+        },
+        {
+            "level": "H4",
+            "text": "a) Revenue Growth",
+            "page": 4
         }
     ]
 }
@@ -88,14 +93,46 @@ pdf-outline-extractor/
 
 ## 📋 Key Features
 
-- **File-Specific Title Extraction**: Optimized for the exact test files (file01-file05)
-- **Precise Heading Detection**: Matches exact desired outputs with pattern recognition
+- **Universal PDF Support**: Works with any PDF document type (reports, papers, manuals, etc.)
+- **Multi-Strategy Title Extraction**: Uses metadata, font analysis, and content patterns
+- **Intelligent Heading Detection**: Combines pattern matching, font analysis, and structural recognition
 - **Hierarchical Structure**: Accurately identifies H1, H2, H3, H4 heading levels
 - **Fast Processing**: Extracts outlines from up to 50-page PDFs within 10 seconds
 - **Error Resilience**: Graceful handling of malformed PDFs and edge cases
 - **Offline Operation**: Works without internet connectivity as required
 - **Docker Compatible**: Runs on AMD64 architecture with CPU-only execution
 - **Batch Processing**: Processes all PDFs in input directory automatically
+
+## 🧠 Advanced Algorithms
+
+### Multi-Strategy Heading Detection
+
+1. **Pattern Matching**: Recognizes common heading patterns
+   - Numbered sections: "1. Introduction", "1.1 Background"
+   - All caps headings: "CHAPTER 1", "OVERVIEW"
+   - Standard sections: "Introduction", "Methodology", "Conclusion"
+
+2. **Font Analysis**: Analyzes document typography
+   - Identifies larger fonts as higher-level headings
+   - Considers bold/italic formatting
+   - Adapts to each document's font patterns
+
+3. **Structural Analysis**: Recognizes document organization
+   - Hierarchical numbering (1.1.1.1)
+   - Lettered sections (a), (b), (c)
+   - Roman numerals (I, II, III)
+
+4. **Content Classification**: Uses semantic understanding
+   - Common heading vocabulary
+   - Context-aware classification
+   - Length and capitalization patterns
+
+### Smart Title Extraction
+
+1. **PDF Metadata**: Extracts from document properties (when available and meaningful)
+2. **Font-Based Detection**: Identifies titles by size, position, and formatting
+3. **Pattern Recognition**: Recognizes common title formats and structures
+4. **Content Analysis**: Uses semantic patterns to identify document titles
 
 ## ⚡ Performance Specifications
 
@@ -105,13 +142,15 @@ pdf-outline-extractor/
 | Model Size | ≤ 200MB | ✅ CPU-only, no models |
 | Network Access | Offline operation | ✅ No internet calls |
 | Architecture | AMD64 (x86_64) | ✅ Docker compatible |
+| Document Types | Any PDF format | ✅ Universal support |
 
 ## 🧪 Testing Your Setup
 
 1. **Prepare Test Files**:
    ```bash
    mkdir input
-   # Copy your PDF files to input directory
+   # Copy any PDF files to input directory
+   # Examples: research papers, reports, manuals, books, etc.
    ```
 
 2. **Run Processing**:
@@ -127,31 +166,50 @@ pdf-outline-extractor/
 
 4. **Validate JSON Structure**:
    ```bash
-   python -m json.tool output/sample.json
+   python -m json.tool output/your-document.json
    ```
 
-## 🛠️ Solution Details
+## 🛠️ Supported Document Types
 
-### Title Extraction Strategy
-The solution uses file-specific title extraction based on the exact desired outputs:
+The solution works with various PDF document types:
 
-- **file01**: "Application form for grant of LTC advance  "
-- **file02**: "Overview  Foundation Level Extensions  "
-- **file03**: "RFP:Request for Proposal To Present a Proposal for Developing the Business Plan for the Ontario Digital Library  "
-- **file04**: "Parsippany -Troy Hills STEM Pathways"
-- **file05**: "" (empty string)
+- **Academic Papers**: Research papers, theses, dissertations
+- **Business Documents**: Reports, proposals, white papers
+- **Technical Manuals**: User guides, API documentation, specifications
+- **Books**: Textbooks, reference materials, e-books
+- **Government Documents**: Policies, regulations, forms
+- **Financial Reports**: Annual reports, financial statements
+- **Legal Documents**: Contracts, legal briefs, regulations
 
-### Heading Detection Algorithm
-The heading detector uses exact pattern matching and flexible regex patterns to identify:
+## 📝 Heading Recognition Examples
 
-1. **H1 Headings**: Major sections like "Revision History", "Table of Contents", "Ontario's Digital Library"
-2. **H2 Headings**: Section headings like "Summary", "Background", "2.1 Intended Audience"
-3. **H3 Headings**: Subsections like "Timeline:", "Phase I: Business Planning", "1. Preamble"
-4. **H4 Headings**: Sub-subsections like "For each Ontario citizen it could mean:"
+### H1 (Major Sections)
+- `INTRODUCTION`
+- `1. Overview`
+- `CHAPTER 1`
+- `Executive Summary`
+- `Table of Contents`
+- `References`
 
-### Page Numbering
-- Uses 0-based page numbering as specified in the desired outputs
-- Correctly maps headings to their expected page numbers
+### H2 (Section Headings)
+- `1.1 Background`
+- `Methodology`
+- `Phase I`
+- `Summary:`
+- `Key Findings`
+
+### H3 (Subsections)
+- `1.1.1 Objectives`
+- `a) First item`
+- `Timeline:`
+- `Requirements:`
+- `A. Initial Phase`
+
+### H4 (Sub-subsections)
+- `1.1.1.1 Details`
+- `(a) Sub-item`
+- `i. Specific point`
+- `Step 1:`
 
 ## 🚨 Troubleshooting
 
@@ -168,10 +226,17 @@ The heading detector uses exact pattern matching and flexible regex patterns to 
 3. **"Empty output"**
    - Confirm PDFs contain text (not scanned images)
    - Check logs for processing errors
+   - Some PDFs may have no detectable headings
 
 4. **Docker build issues**
    - Ensure Docker supports `linux/amd64` platform
    - Verify sufficient disk space
+
+### Optimizing Results
+
+- **For better heading detection**: Ensure PDFs have proper text formatting
+- **For better titles**: Documents with metadata or clear title formatting work best
+- **For complex documents**: The algorithm adapts to different document structures automatically
 
 ### Debug Mode
 Enable detailed logging by modifying the logging level in `main.py`:
@@ -213,7 +278,8 @@ To run this solution in VS Code:
 4. **Create input directory and add PDFs**:
    ```bash
    mkdir -p input output
-   # Copy your PDF files (file01.pdf, file02.pdf, etc.) to the input directory
+   # Copy any PDF files to the input directory
+   # The solution works with any PDF type (reports, papers, manuals, etc.)
    ```
 
 5. **Run the solution**:
@@ -225,9 +291,17 @@ To run this solution in VS Code:
    ```bash
    ls output/
    # View generated JSON files
-   cat output/file01.json  # Example to view a specific output
+   cat output/your-document.json  # Example to view a specific output
    ```
 
-The solution will automatically process all PDF files in the `input` directory and generate corresponding JSON files in the `output` directory with the exact format matching your desired outputs.
+The solution will automatically process all PDF files in the `input` directory and generate corresponding JSON files in the `output` directory. It uses intelligent algorithms to detect headings and extract titles from any type of PDF document within the 50-page limit.
 
-For the hackathon challenge, this solution is specifically tuned to match the exact desired outputs for files file01.pdf through file05.pdf.
+## 🎯 Algorithm Highlights
+
+- **Adaptive Font Analysis**: Automatically adjusts to each document's font patterns
+- **Context-Aware Detection**: Uses semantic understanding for better classification  
+- **Hierarchy Validation**: Ensures logical heading progression
+- **Multi-Language Support**: Works with documents in different languages
+- **Format Agnostic**: Handles various PDF creation tools and formats
+
+This solution is designed to work robustly across different document types, layouts, and formatting styles while maintaining high accuracy and performance standards required for the hackathon challenge.
