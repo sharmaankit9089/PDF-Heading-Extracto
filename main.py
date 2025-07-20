@@ -1,255 +1,94 @@
+#!/usr/bin/env python3
 """
-PDF Processor - Core PDF processing and outline extraction functionality
+PDF Outline Extractor - Main Entry Point
+Processes all PDFs in /app/input and generates JSON outlines in /app/output
 """
 
-import fitz  # PyMuPDF
-import re
+import os
+import sys
 import logging
-from typing import Dict, List, Tuple, Optional
-from heading_detector import HeadingDetector
+import json
+from pathlib import Path
+from pdf_processor import PDFProcessor
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
-class PDFProcessor:
-    """Main PDF processing class for extracting document outlines"""
+def main():
+    """Main function to process all PDFs in input directory"""
+    # Check for directories in order of preference
+    if os.path.exists("/app/input"):
+        # Docker environment
+        input_dir = Path("/app/input")
+        output_dir = Path("/app/output")
+    elif os.path.exists("./input"):
+        # Local VS Code setup
+        input_dir = Path("./input")
+        output_dir = Path("./output")
+    elif os.path.exists("./attached_assets"):
+        # Development/testing with sample files
+        input_dir = Path("./attached_assets")
+        output_dir = Path("./output")
+    else:
+        # Create input directory if none exists
+        input_dir = Path("./input")
+        output_dir = Path("./output")
+        input_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created input directory: {input_dir}")
+        logger.info("Please place your PDF files in the 'input' directory and run again.")
     
-    def __init__(self):
-        self.heading_detector = HeadingDetector()
+    # Create output directory if it doesn't exist
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    def extract_outline(self, pdf_path: str) -> Dict:
-        """
-        Extract outline from PDF file
-        
-        Args:
-            pdf_path (str): Path to PDF file
-            
-        Returns:
-            Dict: Extracted outline in required JSON format
-        """
+    # Check if input directory exists and has PDFs
+    if not input_dir.exists():
+        logger.error(f"Input directory {input_dir} does not exist")
+        logger.info("Please create an 'input' directory and place your PDF files there.")
+        sys.exit(1)
+    
+    # Find all PDF files in input directory
+    pdf_files = list(input_dir.glob("*.pdf"))
+    if not pdf_files:
+        logger.warning("No PDF files found in input directory")
+        return
+    
+    logger.info(f"Found {len(pdf_files)} PDF files to process")
+    
+    # Initialize PDF processor
+    processor = PDFProcessor()
+    
+    # Process each PDF file
+    successful_processed = 0
+    for pdf_file in pdf_files:
         try:
-            # Open PDF document
-            doc = fitz.open(pdf_path)
+            logger.info(f"Processing: {pdf_file.name}")
             
-            # Check page count constraint
-            if len(doc) > 50:
-                logger.warning(f"PDF has {len(doc)} pages, exceeding 50 page limit")
+            # Extract outline
+            result = processor.extract_outline(str(pdf_file))
             
-            # Extract title and outline
-            title = self._extract_title(doc)
-            outline = self._extract_headings(doc)
+            # Generate output filename
+            output_filename = pdf_file.stem + ".json"
+            output_path = output_dir / output_filename
             
-            # Close document
-            doc.close()
+            # Save JSON output
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(result, f, indent=4, ensure_ascii=False)
             
-            return {
-                "title": title,
-                "outline": outline
-            }
+            logger.info(f"Successfully processed: {pdf_file.name} -> {output_filename}")
+            successful_processed += 1
             
         except Exception as e:
-            logger.error(f"Error processing PDF {pdf_path}: {str(e)}")
-            raise
+            logger.error(f"Error processing {pdf_file.name}: {str(e)}")
+            continue
     
-    def _extract_title(self, doc: fitz.Document) -> str:
-        """
-        Extract document title from first page
-        
-        Args:
-            doc (fitz.Document): PDF document object
-            
-        Returns:
-            str: Extracted title
-        """
-        if len(doc) == 0:
-            return ""
-        
-        # Check specific title patterns for this document type
-        first_page = doc[0]
-        blocks = first_page.get_text("dict")["blocks"]
-        
-        # Look for specific title patterns
-        all_text_elements = []
-        for block in blocks:
-            if "lines" in block:
-                for line in block["lines"]:
-                    for span in line["spans"]:
-                        text = span["text"].strip()
-                        if text:
-                            all_text_elements.append(text)
-        
-        # Join first few lines to find common title patterns
-        first_lines = " ".join(all_text_elements[:10])
-        
-        # Check for RFP title pattern
-        if "RFP" in first_lines and ("Request for Proposal" in first_lines or "To Present a Proposal" in first_lines):
-            return "RFP:Request for Proposal To Present a Proposal for Developing the Business Plan for the Ontario Digital Library"
-        
-        # Look for main title in subtitle area
-        for i, text in enumerate(all_text_elements):
-            if "To Present a Proposal" in text:
-                return text
-        
-        # Try to get title from document metadata
-        metadata_title = doc.metadata.get('title', '').strip()
-        if metadata_title:
-            return metadata_title
-        
-        # Look for title in first few text blocks
-        title_candidates = []
-        
-        for block in blocks[:5]:  # Check first 5 blocks
-            if "lines" not in block:
-                continue
-                
-            for line in block["lines"]:
-                for span in line["spans"]:
-                    text = span["text"].strip()
-                    if text and len(text) > 10:  # Reasonable title length
-                        font_size = span["size"]
-                        font_flags = span["flags"]
-                        
-                        # Score based on position, size, and formatting
-                        score = self._calculate_title_score(span, block)
-                        title_candidates.append((text, score, font_size))
-        
-        # Sort by score and return best candidate
-        if title_candidates:
-            title_candidates.sort(key=lambda x: x[1], reverse=True)
-            return self._clean_title_text(title_candidates[0][0])
-        
-        return "Untitled Document"
-    
-    def _calculate_title_score(self, span: Dict, block: Dict) -> float:
-        """Calculate title candidacy score for a text span"""
-        score = 0.0
-        
-        # Font size score (larger is better)
-        font_size = span["size"]
-        score += font_size * 2
-        
-        # Position score (higher on page is better)
-        y_position = block["bbox"][1]  # Top of block
-        score += max(0, 100 - y_position)  # Prefer text near top
-        
-        # Font flags (bold, italic bonus)
-        flags = span["flags"]
-        if flags & 2**4:  # Bold
-            score += 20
-        if flags & 2**1:  # Italic
-            score += 10
-        
-        # Text length score (reasonable titles)
-        text_len = len(span["text"].strip())
-        if 10 <= text_len <= 100:
-            score += 15
-        elif text_len > 100:
-            score -= 10
-        
-        return score
-    
-    def _clean_title_text(self, title: str) -> str:
-        """Clean and normalize title text"""
-        # Remove extra whitespace
-        title = ' '.join(title.split())
-        
-        # Remove common prefixes/suffixes
-        title = re.sub(r'^(RFP:|Request for Proposal|Title:|Document:|Report:)\s*', '', title, flags=re.IGNORECASE)
-        title = title.strip()
-        
-        return title
-    
-    def _extract_headings(self, doc: fitz.Document) -> List[Dict]:
-        """
-        Extract hierarchical headings from PDF
-        
-        Args:
-            doc (fitz.Document): PDF document object
-            
-        Returns:
-            List[Dict]: List of heading dictionaries
-        """
-        consolidated_elements = []
-        
-        # Extract text by blocks first, then consolidate
-        for page_num, page in enumerate(doc):
-            blocks = page.get_text("dict")["blocks"]
-            
-            for block in blocks:
-                if "lines" not in block:
-                    continue
-                
-                # Consolidate entire block text
-                block_text = ""
-                block_spans = []
-                block_font_sizes = []
-                block_font_flags = []
-                
-                for line in block["lines"]:
-                    for span in line["spans"]:
-                        text = span["text"].strip()
-                        if text:
-                            block_text += text + " "
-                            block_spans.append(span)
-                            block_font_sizes.append(span["size"])
-                            block_font_flags.append(span["flags"])
-                
-                block_text = block_text.strip()
-                
-                if block_text and len(block_text.split()) >= 1:
-                    # Calculate dominant properties
-                    if block_font_sizes:
-                        avg_font_size = sum(block_font_sizes) / len(block_font_sizes)
-                        most_common_flags = max(set(block_font_flags), key=block_font_flags.count) if block_font_flags else 0
-                        
-                        # Split by common separators and periods for potential multi-heading blocks
-                        potential_headings = self._split_block_into_headings(block_text)
-                        
-                        for heading_text in potential_headings:
-                            if heading_text and len(heading_text.strip()) > 3:
-                                consolidated_elements.append({
-                                    "text": heading_text.strip(),
-                                    "page": page_num + 1,
-                                    "font_size": avg_font_size,
-                                    "font_flags": most_common_flags,
-                                    "font_name": block_spans[0]["font"] if block_spans else "",
-                                    "bbox": block["bbox"],
-                                    "block_bbox": block["bbox"]
-                                })
-        
-        # Detect headings using the heading detector
-        headings = self.heading_detector.detect_headings(consolidated_elements)
-        
-        return headings
-    
-    def _split_block_into_headings(self, block_text: str) -> List[str]:
-        """Split a block of text into potential individual headings"""
-        # Look for natural break points
-        potential_splits = []
-        
-        # Split on common patterns that indicate separate headings
-        patterns = [
-            r'\n+',  # Line breaks
-            r'(?<=[.!?])\s+(?=[A-Z])',  # Sentence boundaries followed by capitals
-            r'(?<=:)\s+(?=[A-Z])',  # Colons followed by capitals
-            r'(?<=\d\.)\s+(?=[A-Z])',  # Numbered items
-        ]
-        
-        current_text = block_text
-        for pattern in patterns:
-            parts = re.split(pattern, current_text)
-            if len(parts) > 1:
-                potential_splits.extend(parts)
-                break
-        
-        if not potential_splits:
-            potential_splits = [block_text]
-        
-        # Clean and filter
-        cleaned_splits = []
-        for split in potential_splits:
-            split = split.strip()
-            # Only keep reasonably sized text that could be headings
-            if 3 <= len(split) <= 200 and not re.match(r'^[0-9\s\.\-,]+$', split):
-                cleaned_splits.append(split)
-        
-        return cleaned_splits
+    logger.info(f"Processing complete. Successfully processed {successful_processed}/{len(pdf_files)} files")
+
+if __name__ == "__main__":
+    main()
